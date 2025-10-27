@@ -1,0 +1,89 @@
+name: "Setup Chisel"
+description: "Download, verify, and install Canonical Chisel"
+author: "Mattheish"
+branding:
+  icon: "download"
+  color: "blue"
+
+inputs:
+  version:
+    description: "Chisel release version (e.g. v1.3.0 or 'latest')"
+    required: true
+    default: "v1.3.0"
+
+outputs:
+  version:
+    description: "Installed Chisel version"
+    value: ${{ steps.setup.outputs.version }}
+  architecture:
+    description: "Detected architecture"
+    value: ${{ steps.setup.outputs.architecture }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up environment
+      id: setup
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Resolve the version string
+
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          # Use the GitHub API to find the tag name of the latest release
+          VERSION=$(curl -fsSL https://api.github.com/repos/canonical/chisel/releases/latest | jq -r '.tag_name')
+        fi
+
+        # Detect the runner's architecture
+
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64)   ARCH="amd64"   ;;
+          aarch64)  ARCH="arm64"   ;;
+          armv7l)   ARCH="arm"     ;;
+          ppc64le)  ARCH="ppc64le" ;;
+          riscv64)  ARCH="riscv64" ;;
+          s390x)    ARCH="s390x"   ;;
+          *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+        esac
+
+        # Set outputs and env
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "architecture=$ARCH" >> $GITHUB_OUTPUT
+
+    - name: Download and verify Chisel
+      id: download
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        VERSION="${{ steps.setup.outputs.version }}"
+        ARCH="${{ steps.setup.outputs.architecture }}"
+        ASSET="chisel_${VERSION}_linux_${ARCH}.tar.gz"
+        BASE_URL="https://github.com/canonical/chisel/releases/download/${VERSION}"
+
+        echo "Downloading from ${BASE_URL}/${ASSET}"
+        curl -fsSL -o "${ASSET}" "${BASE_URL}/${ASSET}"
+        curl -fsSL -o "${ASSET}.sha384" "${BASE_URL}/${ASSET}.sha384"
+
+        echo "Verifying checksum..."
+        sha384sum -c "${ASSET}.sha384"
+        
+        echo "asset=${ASSET}" >> $GITHUB_OUTPUT
+
+    - name: Extract and install Chisel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ASSET="${{ steps.download.outputs.asset }}"
+
+        echo "Extracting ${ASSET}"
+        tar -xzf "${ASSET}"
+
+        chmod +x chisel
+
+        echo "Adding chisel to the path"
+        echo "$PWD" >> $GITHUB_PATH
