@@ -10,33 +10,40 @@ inputs:
     description: "Chisel release version (e.g. v1.3.0 or 'latest')"
     required: true
     default: "v1.3.0"
+  install-wrapper:
+    description: "Whether to install the chisel-wrapper script"
+    required: false
+    default: "false"
 
 outputs:
   version:
     description: "Installed Chisel version"
-    value: ${{ steps.setup.outputs.version }}
+    value: ${{ steps.resolve-version.outputs.version }}
   architecture:
     description: "Detected architecture"
-    value: ${{ steps.setup.outputs.architecture }}
+    value: ${{ steps.detect-arch.outputs.architecture }}
 
 runs:
   using: "composite"
   steps:
-    - name: Set up environment
-      id: setup
+    - name: Resolve Chisel version
+      id: resolve-version
       shell: bash
       run: |
         set -euo pipefail
 
-        # Resolve the version string
-
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
-          # Use the GitHub API to find the tag name of the latest release
           VERSION=$(curl -fsSL https://api.github.com/repos/canonical/chisel/releases/latest | jq -r '.tag_name')
         fi
 
-        # Detect the runner's architecture
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Detect runner architecture
+      id: detect-arch
+      shell: bash
+      run: |
+        set -euo pipefail
 
         ARCH=$(uname -m)
         case "$ARCH" in
@@ -49,8 +56,6 @@ runs:
           *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
         esac
 
-        # Set outputs and env
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "architecture=$ARCH" >> $GITHUB_OUTPUT
 
     - name: Download and verify Chisel
@@ -59,8 +64,8 @@ runs:
       run: |
         set -euo pipefail
 
-        VERSION="${{ steps.setup.outputs.version }}"
-        ARCH="${{ steps.setup.outputs.architecture }}"
+        VERSION="${{ steps.resolve-version.outputs.version }}"
+        ARCH="${{ steps.detect-arch.outputs.architecture }}"
         ASSET="chisel_${VERSION}_linux_${ARCH}.tar.gz"
         BASE_URL="https://github.com/canonical/chisel/releases/download/${VERSION}"
 
@@ -87,3 +92,14 @@ runs:
 
         echo "Adding chisel to the path"
         echo "$PWD" >> $GITHUB_PATH
+
+    - name: Download and install chisel-wrapper
+      if: ${{ inputs.install-wrapper == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        WRAPPER_URL="https://raw.githubusercontent.com/canonical/rocks-toolbox/main/chisel-wrapper"
+        echo "Downloading chisel-wrapper from ${WRAPPER_URL}"
+        curl -fsSL -o chisel-wrapper "$WRAPPER_URL"
+        chmod +x chisel-wrapper
